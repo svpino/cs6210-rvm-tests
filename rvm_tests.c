@@ -16,7 +16,6 @@ static void copy_test_template(char * source, char * target, char * directory);
 int main(int argc, char **argv) {
 	char * directory = "RVM";
 	char * log_filename = get_log_file_name(directory);
- 	
 
 	/* 
 	 * TEST 1 - rvm_init
@@ -50,6 +49,7 @@ int main(int argc, char **argv) {
 	assertTrue(" 3a", "Mapping should fail is rvm is not specified", segment == NULL);
 
 	rvm_t rvm2 = malloc(sizeof(*rvm));
+	strcpy(rvm2->prefix, "");
 	segment = (char *) rvm_map(rvm2, "segment1", 10000);
 	assertTrue(" 3b", "Mapping should fails if supplied rvm doesn't specify a directory", segment == NULL);
 	free(rvm2);
@@ -81,6 +81,7 @@ int main(int argc, char **argv) {
 	copy_test_template("segment1", "segment1", directory);
 	segment = (char *) rvm_map(rvm, "segment1", 12);
 	assertTrue(" 3h", "Segments should be initialized from segment file during mapping", strcmp(segment, "hello world!") == 0);
+	seqsrchst_delete(&rvm->segst, "segment1");
 
 	segment = (char *) rvm_map(rvm, "segment1", 10000);
 
@@ -89,11 +90,11 @@ int main(int argc, char **argv) {
 	assertTrue(" 3k", "List of segments doesn't have an inexistent segment", !seqsrchst_contains(&rvm->segst, "segment-invalid"));
 
 	segment2 = (char *) rvm_map(rvm, "segment1", 10000);
-	assertTrue(" 3l", "Trying to map same segment twice returns existing segment", segment == segment2);
+	assertTrue(" 3l", "Trying to map same segment twice returns NULL", segment2 == NULL);
 	assertTrue(" 3m", "Trying to map same segment twice doesn't add new segment to list", seqsrchst_size(&rvm->segst) == 1);
 
 	char * segment3 = (char *) rvm_map(rvm, "segment1", 5000);
-	assertTrue(" 3n", "If specified size is shorter, segment shouldn't be mapped again", segment == segment3);
+	assertTrue(" 3n", "If specified size is shorter, segment shouldn't be mapped again", segment3 == NULL);
 	assertTrue(" 3o", "If specified size is shorter, segment shouldn't be added again to the list", seqsrchst_size(&rvm->segst) == 1);
 
 	char * segment4 = (char *) rvm_map(rvm, "segment1", 20000);
@@ -148,7 +149,7 @@ int main(int argc, char **argv) {
 	
 	segment2 = (char *) rvm_map(rvm, "segment1", 30000);
 	stat(segment_file_name, &file_stat);
-	assertTrue(" 4f", "If segment exists and file exists, we don't have to do anything", segment == segment2 && file_stat.st_size == 30000);
+	assertTrue(" 4f", "If segment exists and file exists, we don't have to do anything", segment2 == NULL && file_stat.st_size == 30000);
 
 	remove(segment_file_name);
 	stat(segment_file_name, &file_stat);
@@ -163,6 +164,7 @@ int main(int argc, char **argv) {
 	segment = (char *) rvm_map(rvm, "segment1", 10000);
 	rvm_unmap(NULL, segment);
 	assertTrue(" 5a", "Segment shouldn't be unmapped if rvm is not initialized", seqsrchst_size(&rvm->segst) == 1);		
+	seqsrchst_delete(&rvm->segst, "segment1");
 
 	segment = (char *) rvm_map(rvm, "segment1", 10000);
 	rvm_unmap(rvm, segment);
@@ -194,6 +196,7 @@ int main(int argc, char **argv) {
 	segment = (char *) rvm_map(rvm, "segment1", 10000);
 	rvm_destroy(NULL, "segment1");
 	assertTrue(" 6a", "Segment shouldn't be destroyed if rvm is not initialized", stat(segment_file_name, &file_stat) == 0);		
+	seqsrchst_delete(&rvm->segst, "segment1");
 
 	segment = (char *) rvm_map(rvm, "segment1", 10000);
 	rvm_destroy(rvm, "segment1");
@@ -219,6 +222,7 @@ int main(int argc, char **argv) {
 	trans = rvm_begin_trans(rvm, 1, (void**)segments);
 	assertTrue(" 7b", "Transaction should return -1 if segment is related to another transaction", trans == -1);
 	st->cur_trans = NULL;
+	seqsrchst_delete(&rvm->segst, "segment1");
 
 	segment2 = malloc(1);
 	trans = rvm_begin_trans(rvm, 1, (void**)segment2);
@@ -357,20 +361,65 @@ int main(int argc, char **argv) {
 	assertTrue("10d", "List of modifications should be removed after abort", steque_size(&st1->mods) == 0 && steque_size(&st2->mods) == 0);
 	assertTrue("10e", "Segments should not be associated with a transaction after abort", st1->cur_trans == NULL && st2->cur_trans == NULL);
 
+	/*
+	 * TEST 11 - rvm_truncate_log
+	 */
+
+	copy_test_template("rvm1.log", "rvm.log", directory);
+	stat(log_filename, &file_stat);
+
+	rvm_truncate_log(NULL);
+	assertTrue("11a", "Nothing should happen if rvm is NULL", file_stat.st_size == 82); 
+
+	rvm2 = malloc(sizeof(*rvm));
+	strcpy(rvm2->prefix, "");
+	rvm_truncate_log(rvm2);
+	stat(log_filename, &file_stat);
+	assertTrue("11b", "Nothing should happen if rvm is not initialized", file_stat.st_size == 82); 
+	free(rvm2);
+
+	segment_file_name = get_segment_file_name(directory, "segment1");
+	remove(segment_file_name);
+	free(segment_file_name);
+	
+	segment_file_name = get_segment_file_name(directory, "segment2");
+	remove(segment_file_name);
+	free(segment_file_name);
+
+	segment_file_name = get_segment_file_name(directory, "segment3");
+	remove(segment_file_name);
+	free(segment_file_name);
+
+	seqsrchst_delete(&rvm->segst, "segment3");
+
+	st1 = seqsrchst_get(&rvm->segst, "segment1");
+	st2 = seqsrchst_get(&rvm->segst, "segment2");
+
+	sprintf(st1->segbase, "xxx");
+	sprintf(st2->segbase, "xxx");
+
+	rvm_truncate_log(rvm);
+	stat(log_filename, &file_stat);
+
+	assertTrue("11c", "Segment 1 is updated from log file", strcmp(st1->segbase, "segment1-value") == 0); 
+	assertTrue("11d", "Segment 2 is updated from log file", strcmp(st2->segbase, "segment2-value") == 0); 
+	assertTrue("11e", "Truncating leaves the log file empty", file_stat.st_size == 0); 
 
 	/* Deallocating resources and removing files*/
 	free(segment_file_name);
 
 	segment_file_name = get_segment_file_name(directory, "segment1");
 	remove(segment_file_name);
+	free(segment_file_name);
 	
 	segment_file_name = get_segment_file_name(directory, "segment2");
 	remove(segment_file_name);
+	free(segment_file_name);
 
 	segment_file_name = get_segment_file_name(directory, "segment3");
 	remove(segment_file_name);
-
 	free(segment_file_name);
+
 	free(log_filename);
 
 	printf("%d Tests, %d Failed.\n", test_count, failed_test_count);
