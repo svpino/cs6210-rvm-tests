@@ -204,7 +204,14 @@ int main(int argc, char **argv) {
 
 	rvm_unmap(rvm, segment);
 	rvm_destroy(rvm, "segment1");
-	assertTrue(" 6c", "Segment file should be destroyed if segment is not mapped", stat(segment_file_name, &file_stat) != 0);		
+	assertTrue(" 6c", "Segment file should be destroyed if segment is not mapped", stat(segment_file_name, &file_stat) != 0);
+
+	segment = (char *) rvm_map(rvm, "segment1", 14);
+	rvm_unmap(rvm, segment);
+	copy_test_template("rvm1.log", "rvm.log", directory);
+	rvm_destroy(rvm, "segment1");
+	stat(log_filename, &file_stat);
+	assertTrue(" 6d", "Log should be truncated to remove all entries related to destroyed segment", file_stat.st_size == 41);
 
 	/*
 	 * TEST 7 - rvm_begin_trans
